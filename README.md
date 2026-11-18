@@ -11,6 +11,7 @@ Java 21 feed handler for SBE exchange market data: **CME MDP 3.0** and **Euronex
 - **Pluggable venues** through a `FeedProtocol` SPI. CME and Optiq are two modules; add yours the same way.
 
 Architecture, the resilience model and the review log are in [DESIGN.md](DESIGN.md).
+The serving layer (subscription API, entitlements, history) and crypto venues are designed in [docs/DESIGN-API-CRYPTO.md](docs/DESIGN-API-CRYPTO.md).
 
 ```
  UDP A ─┐                                    ┌─ ring buffer ─▶ BookManager ─▶ your listener     (all-in-one)
