@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Euronext Optiq Market Data Gateway (MDG) SBE schema: ILLUSTRATIVE SUBSET.
+
+  Message names follow the Optiq MDG naming. Template ids, field sets and the snapshot
+  delimiter messages are simplified for development and tests and MUST be checked against
+  the current Optiq MDG SBE schema before production use. Swap in the official XML and
+  adjust OptiqFeedDecoder field accessors as needed.
+
+  Packet framing used by the adapter: 16-byte packet header
+  (SendingTime u64, PacketSequenceNumber u32, PacketFlags u16, ChannelID u16) followed by
+  contiguous SBE messages, each sized from its header blockLength and group dimensions.
+-->
+<sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe"
+                   package="io.mdp.euronext.sbe"
+                   id="0"
+                   version="1"
+                   description="Euronext Optiq MDG subset"
+                   byteOrder="littleEndian">
+    <types>
+        <composite name="messageHeader">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="templateId" primitiveType="uint16"/>
+            <type name="schemaId" primitiveType="uint16"/>
+            <type name="version" primitiveType="uint16"/>
+        </composite>
+        <composite name="groupSize">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="numInGroup" primitiveType="uint16"/>
+        </composite>
+
+        <type name="Price" primitiveType="int64" presence="optional" nullValue="-9223372036854775808"/>
+        <type name="Quantity" primitiveType="uint64" presence="optional" nullValue="18446744073709551615"/>
+        <type name="ISIN" primitiveType="char" length="12"/>
+        <type name="Mnemonic" primitiveType="char" length="5"/>
+        <type name="InstrumentName" primitiveType="char" length="18"/>
+        <type name="CurrencyCode" primitiveType="char" length="3"/>
+
+        <enum name="MarketDataUpdateType" encodingType="uint8">
+            <validValue name="BidLevel">1</validValue>
+            <validValue name="OfferLevel">2</validValue>
+            <validValue name="LastTradedPrice">3</validValue>
+            <validValue name="OpeningPrice">4</validValue>
+            <validValue name="ClosingPrice">5</validValue>
+            <validValue name="ResetBook">6</validValue>
+        </enum>
+        <enum name="ActionType" encodingType="uint8">
+            <validValue name="NewOrder">1</validValue>
+            <validValue name="ModifyOrder">2</validValue>
+            <validValue name="DeleteOrder">3</validValue>
+            <validValue name="DeleteAllOrders">4</validValue>
+            <validValue name="RetransmissionOrder">5</validValue>
+        </enum>
+        <enum name="OrderSide" encodingType="uint8">
+            <validValue name="Buy">1</validValue>
+            <validValue name="Sell">2</validValue>
+        </enum>
+        <enum name="AggressorSide" encodingType="uint8">
+            <validValue name="None">0</validValue>
+            <validValue name="Buy">1</validValue>
+            <validValue name="Sell">2</validValue>
+        </enum>
+        <enum name="BookState" encodingType="uint8">
+            <validValue name="Inaccessible">1</validValue>
+            <validValue name="Closed">2</validValue>
+            <validValue name="Opened">3</validValue>
+            <validValue name="Suspended">4</validValue>
+            <validValue name="Halted">5</validValue>
+            <validValue name="PreOpen">6</validValue>
+        </enum>
+    </types>
+
+    <sbe:message name="MarketUpdate" id="1001" description="Aggregated price-level updates">
+        <field name="SymbolIndex" id="1" type="uint32"/>
+        <field name="EventTime" id="2" type="uint64"/>
+        <field name="RebroadcastIndicator" id="3" type="uint8"/>
+        <group name="MarketDataUpdates" id="4" dimensionType="groupSize">
+            <field name="UpdateType" id="5" type="MarketDataUpdateType"/>
+            <field name="Level" id="6" type="uint8"/>
+            <field name="Price" id="7" type="Price"/>
+            <field name="Quantity" id="8" type="Quantity"/>
+            <field name="OrderCount" id="9" type="uint32"/>
+        </group>
+    </sbe:message>
+
+    <sbe:message name="OrderUpdate" id="1002" description="Order-level (MBO) update">
+        <field name="SymbolIndex" id="1" type="uint32"/>
+        <field name="EventTime" id="2" type="uint64"/>
+        <field name="ActionType" id="3" type="ActionType"/>
+        <field name="OrderSide" id="4" type="OrderSide"/>
+        <field name="OrderPriority" id="5" type="uint64"/>
+        <field name="OrderPx" id="6" type="Price"/>
+        <field name="OrderQuantity" id="7" type="Quantity"/>
+    </sbe:message>
+
+    <sbe:message name="FullTradeInformation" id="1004" description="Trade publication">
+        <field name="SymbolIndex" id="1" type="uint32"/>
+        <field name="EventTime" id="2" type="uint64"/>
+        <field name="TradeUniqueIdentifier" id="3" type="uint64"/>
+        <field name="Price" id="4" type="Price"/>
+        <field name="TradeQty" id="5" type="Quantity"/>
+        <field name="AggressorSide" id="6" type="AggressorSide"/>
+    </sbe:message>
+
+    <sbe:message name="MarketStatusChange" id="1006" description="Book state change">
+        <field name="SymbolIndex" id="1" type="uint32"/>
+        <field name="EventTime" id="2" type="uint64"/>
+        <field name="BookState" id="3" type="BookState"/>
+    </sbe:message>
+
+    <sbe:message name="StandingData" id="1007" description="Instrument reference data">
+        <field name="SymbolIndex" id="1" type="uint32"/>
+        <field name="PriceDecimals" id="2" type="uint8"/>
+        <field name="QuantityDecimals" id="3" type="uint8"/>
+        <field name="ISINCode" id="4" type="ISIN"/>
+        <field name="Mnemonic" id="5" type="Mnemonic"/>
+        <field name="InstrumentName" id="6" type="InstrumentName"/>
+        <field name="CurrencyCode" id="7" type="CurrencyCode"/>
+        <field name="TickSize" id="8" type="Price"/>
+    </sbe:message>
+
+    <sbe:message name="StartOfSnapshot" id="1101" description="Illustrative snapshot cycle start">
+        <field name="LastPacketSequenceNumber" id="1" type="uint64"/>
+    </sbe:message>
+
+    <sbe:message name="EndOfSnapshot" id="1102" description="Illustrative snapshot cycle end">
+        <field name="LastPacketSequenceNumber" id="1" type="uint64"/>
+    </sbe:message>
+</sbe:messageSchema>

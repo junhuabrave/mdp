@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  MDP normalized market data schema.
+  Venue adapters translate exchange messages into these fixed-length messages.
+  Fixed length only (no var data) so every message has a known size for tryClaim().
+-->
+<sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe"
+                   package="io.mdp.sbe"
+                   id="900"
+                   version="1"
+                   semanticVersion="1.0"
+                   description="MDP normalized market data"
+                   byteOrder="littleEndian">
+    <types>
+        <composite name="messageHeader">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="templateId" primitiveType="uint16"/>
+            <type name="schemaId" primitiveType="uint16"/>
+            <type name="version" primitiveType="uint16"/>
+        </composite>
+        <composite name="groupSizeEncoding">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="numInGroup" primitiveType="uint16"/>
+        </composite>
+        <composite name="varStringEncoding">
+            <type name="length" primitiveType="uint32" maxValue="1073741824"/>
+            <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
+        </composite>
+
+        <type name="Symbol" primitiveType="char" length="32" characterEncoding="US-ASCII"/>
+        <type name="SecurityType" primitiveType="char" length="8" characterEncoding="US-ASCII"/>
+        <type name="Currency" primitiveType="char" length="3" characterEncoding="US-ASCII"/>
+
+        <enum name="Side" encodingType="uint8">
+            <validValue name="BUY">0</validValue>
+            <validValue name="SELL">1</validValue>
+        </enum>
+        <enum name="AggressorSide" encodingType="uint8">
+            <validValue name="NONE">0</validValue>
+            <validValue name="BUY">1</validValue>
+            <validValue name="SELL">2</validValue>
+        </enum>
+        <enum name="BookType" encodingType="uint8">
+            <validValue name="MBP">0</validValue>
+            <validValue name="MBO">1</validValue>
+            <validValue name="IMPLIED">2</validValue>
+        </enum>
+        <enum name="UpdateAction" encodingType="uint8">
+            <validValue name="NEW">0</validValue>
+            <validValue name="CHANGE">1</validValue>
+            <validValue name="DELETE">2</validValue>
+            <validValue name="DELETE_THRU">3</validValue>
+            <validValue name="DELETE_FROM">4</validValue>
+            <validValue name="OVERLAY">5</validValue>
+            <validValue name="CLEAR">6</validValue>
+        </enum>
+        <enum name="TradingStatus" encodingType="uint8">
+            <validValue name="UNKNOWN">0</validValue>
+            <validValue name="PRE_OPEN">1</validValue>
+            <validValue name="OPEN">2</validValue>
+            <validValue name="HALT">3</validValue>
+            <validValue name="PAUSE">4</validValue>
+            <validValue name="CLOSE">5</validValue>
+            <validValue name="POST_CLOSE">6</validValue>
+        </enum>
+        <enum name="FeedEventType" encodingType="uint8">
+            <validValue name="GAP_DETECTED">0</validValue>
+            <validValue name="BOOK_STALE">1</validValue>
+            <validValue name="RECOVERY_STARTED">2</validValue>
+            <validValue name="RECOVERY_COMPLETE">3</validValue>
+            <validValue name="CHANNEL_RESET">4</validValue>
+            <validValue name="SEQUENCE_RESET">5</validValue>
+            <validValue name="LINE_DOWN">6</validValue>
+            <validValue name="LINE_UP">7</validValue>
+        </enum>
+        <set name="EventFlags" encodingType="uint8">
+            <choice name="lastInEvent">0</choice>
+            <choice name="snapshot">1</choice>
+            <choice name="implied">2</choice>
+        </set>
+    </types>
+
+    <sbe:message name="BookUpdate" id="1" description="Price level (MBP) or order (MBO) book change">
+        <field name="venueId" id="1" type="uint16"/>
+        <field name="bookType" id="2" type="BookType"/>
+        <field name="side" id="3" type="Side"/>
+        <field name="action" id="4" type="UpdateAction"/>
+        <field name="level" id="5" type="uint8"/>
+        <field name="priceExponent" id="6" type="int8"/>
+        <field name="flags" id="7" type="EventFlags"/>
+        <field name="channelId" id="8" type="uint32"/>
+        <field name="instrumentId" id="9" type="int64"/>
+        <field name="priceMantissa" id="10" type="int64"/>
+        <field name="size" id="11" type="int64"/>
+        <field name="numOrders" id="12" type="int32"/>
+        <field name="orderId" id="13" type="uint64"/>
+        <field name="instrumentSeq" id="14" type="uint64"/>
+        <field name="packetSeq" id="15" type="uint64"/>
+        <field name="exchangeTimeNs" id="16" type="uint64"/>
+        <field name="receiveTimeNs" id="17" type="uint64"/>
+    </sbe:message>
+
+    <sbe:message name="Trade" id="2" description="Trade summary">
+        <field name="venueId" id="1" type="uint16"/>
+        <field name="aggressorSide" id="2" type="AggressorSide"/>
+        <field name="priceExponent" id="3" type="int8"/>
+        <field name="flags" id="4" type="EventFlags"/>
+        <field name="channelId" id="5" type="uint32"/>
+        <field name="instrumentId" id="6" type="int64"/>
+        <field name="priceMantissa" id="7" type="int64"/>
+        <field name="size" id="8" type="int64"/>
+        <field name="numOrders" id="9" type="int32"/>
+        <field name="tradeId" id="10" type="uint64"/>
+        <field name="instrumentSeq" id="11" type="uint64"/>
+        <field name="packetSeq" id="12" type="uint64"/>
+        <field name="exchangeTimeNs" id="13" type="uint64"/>
+        <field name="receiveTimeNs" id="14" type="uint64"/>
+    </sbe:message>
+
+    <sbe:message name="InstrumentStatus" id="3" description="Trading status change">
+        <field name="venueId" id="1" type="uint16"/>
+        <field name="status" id="2" type="TradingStatus"/>
+        <field name="flags" id="3" type="EventFlags"/>
+        <field name="channelId" id="4" type="uint32"/>
+        <field name="instrumentId" id="5" type="int64"/>
+        <field name="packetSeq" id="6" type="uint64"/>
+        <field name="exchangeTimeNs" id="7" type="uint64"/>
+        <field name="receiveTimeNs" id="8" type="uint64"/>
+    </sbe:message>
+
+    <sbe:message name="InstrumentDefinition" id="4" description="Static instrument data">
+        <field name="venueId" id="1" type="uint16"/>
+        <field name="priceExponent" id="2" type="int8"/>
+        <field name="channelId" id="3" type="uint32"/>
+        <field name="instrumentId" id="4" type="int64"/>
+        <field name="minPriceIncrement" id="5" type="int64"/>
+        <field name="displayFactor" id="6" type="int64"/>
+        <field name="symbol" id="7" type="Symbol"/>
+        <field name="securityType" id="8" type="SecurityType"/>
+        <field name="currency" id="9" type="Currency"/>
+        <field name="exchangeTimeNs" id="10" type="uint64"/>
+        <field name="receiveTimeNs" id="11" type="uint64"/>
+    </sbe:message>
+
+    <sbe:message name="FeedEvent" id="5" description="Feed state change: gaps, staleness, recovery, line health">
+        <field name="venueId" id="1" type="uint16"/>
+        <field name="eventType" id="2" type="FeedEventType"/>
+        <field name="lineId" id="3" type="uint8"/>
+        <field name="channelId" id="4" type="uint32"/>
+        <field name="instrumentId" id="5" type="int64" description="0 = whole channel"/>
+        <field name="fromSeq" id="6" type="uint64"/>
+        <field name="toSeq" id="7" type="uint64"/>
+        <field name="timeNs" id="8" type="uint64"/>
+    </sbe:message>
+</sbe:messageSchema>
