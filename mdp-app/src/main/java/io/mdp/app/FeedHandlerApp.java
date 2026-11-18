@@ -35,6 +35,7 @@ import io.mdp.core.sink.NormalizedSink;
 import io.mdp.core.sink.RingBufferSink;
 import io.mdp.core.transport.AeronPacketRelay;
 import io.mdp.core.transport.PacketSource;
+import io.mdp.core.transport.pcap.PcapReplays;
 import io.mdp.otel.OtelCountersExporter;
 import org.agrona.BufferUtil;
 import org.agrona.CloseHelper;
@@ -252,9 +253,12 @@ public final class FeedHandlerApp implements AutoCloseable
     private ChannelHandler newChannelHandler(
         final FeedProtocol protocol, final int channelId, final FeedDecoder decoder, final NormalizedSink sink)
     {
-        final PacketSource[] incremental = ChannelFactory.sources(config, channelId, FeedType.INCREMENTAL, aeron, clock);
-        final PacketSource[] snapshot = ChannelFactory.sources(config, channelId, FeedType.SNAPSHOT, aeron, clock);
-        final PacketSource[] definition = ChannelFactory.sources(config, channelId, FeedType.DEFINITION, aeron, clock);
+        final PcapReplays replays = new PcapReplays(clock); // a channel's lines share one replay per capture file
+        final PacketSource[] incremental =
+            ChannelFactory.sources(config, channelId, FeedType.INCREMENTAL, aeron, clock, replays);
+        final PacketSource[] snapshot = ChannelFactory.sources(config, channelId, FeedType.SNAPSHOT, aeron, clock, replays);
+        final PacketSource[] definition =
+            ChannelFactory.sources(config, channelId, FeedType.DEFINITION, aeron, clock, replays);
         LOG.log(System.Logger.Level.INFO, String.format("channel %d: %d incremental, %d snapshot, %d definition lines",
             channelId, incremental.length, snapshot.length, definition.length));
         return new ChannelHandler(channelId, protocol.venueId(), protocol.packetHeader(), decoder, sink,

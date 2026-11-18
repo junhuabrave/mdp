@@ -16,6 +16,8 @@ import io.mdp.cme.CmePacketWriter;
 import io.mdp.cme.sbe.AggressorSide;
 import io.mdp.cme.sbe.MDUpdateAction;
 import io.mdp.core.config.MdpConfig;
+import io.mdp.core.transport.pcap.PcapWriter;
+import io.mdp.core.transport.pcap.UdpFrame;
 import io.mdp.euronext.OptiqPacketWriter;
 import io.mdp.euronext.sbe.MarketDataUpdateType;
 import org.agrona.DirectBuffer;
@@ -39,6 +41,8 @@ import org.agrona.concurrent.SystemEpochNanoClock;
  * sim.snapshot.intervalMillis=1000
  * sim.durationSeconds=0     0 = run forever
  * sim.lossStopsAfterSeconds=0  stop injecting loss after N seconds (0 = never), for a clean tail
+ * sim.pcap.out=feed.pcap    also record every packet sent (after loss) to a capture file
+ * sim.pcap.only=false       true: record only, do not send on the network
  * </pre>
  * SendingTime carries the epoch-nanosecond send time, so the handler's wire-latency metric measures
  * the network path (and loopback on a single host).
@@ -61,6 +65,9 @@ public final class FeedSimulator implements Runnable
     private final long lossStopsAfterNs;
     private long startNs;
     private final DatagramChannel socket;
+    private final PcapWriter pcap;
+    private final boolean pcapOnly;
+    private final int pcapSourceIp = UdpFrame.ipv4("10.0.0.1");
     private final List<InetSocketAddress> incrementalTargets = new ArrayList<>();
     private final List<InetSocketAddress> snapshotTargets = new ArrayList<>();
     private final ByteBuffer sendBuffer = ByteBuffer.allocateDirect(2048);
@@ -96,6 +103,13 @@ public final class FeedSimulator implements Runnable
             addTarget(snapshotTargets, config.get("sim.snapshot." + line));
         }
         socket = DatagramChannel.open();
+        final String pcapOut = config.get("sim.pcap.out", "");
+        pcap = pcapOut.isBlank() ? null : new PcapWriter(Path.of(pcapOut), true);
+        pcapOnly = null != pcap && config.getBoolean("sim.pcap.only", false);
+        if (null != pcap)
+        {
+            Runtime.getRuntime().addShutdownHook(new Thread(pcap::close, "pcap-close"));
+        }
         socket.setOption(java.net.StandardSocketOptions.IP_MULTICAST_LOOP, true);
 
         rptSeq = new long[instruments];
@@ -154,6 +168,11 @@ public final class FeedSimulator implements Runnable
                 System.out.printf("simulator: sent=%d dropped(both)=%d seq=%d%n", sent, dropped, incrementalSeq);
                 nextReport = now + TimeUnit.SECONDS.toNanos(5);
             }
+        }
+        if (null != pcap)
+        {
+            pcap.close();
+            System.out.printf("simulator: recorded %d packets to %s%n", pcap.records(), pcap.path());
         }
     }
 
@@ -276,6 +295,15 @@ public final class FeedSimulator implements Runnable
 
     private void send(final DirectBuffer packet, final int length, final InetSocketAddress target)
     {
+        if (null != pcap)
+        {
+            pcap.writeUdp(clock.nanoTime(), pcapSourceIp, 30000,
+                UdpFrame.ipv4(target.getAddress().getHostAddress()), target.getPort(), packet, 0, length);
+            if (pcapOnly)
+            {
+                return;
+            }
+        }
         sendBuffer.clear();
         packet.getBytes(0, sendBuffer, length);
         sendBuffer.flip();

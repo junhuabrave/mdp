@@ -393,6 +393,19 @@ Logs: lifecycle and errors only, from non-hot threads (`System.Logger`). Hot-pat
 | Allocation | Steady-state run under JFR with zero allocation events on hot threads |
 | Latency | `LatencyBenchmark` (HdrHistogram output) in all-in-one and split modes; JMH for decoder micro-benchmarks |
 | Simulator | `FeedSimulator`: synthetic CME/Optiq traffic over UDP to A/B with configurable loss, reorder and snapshot loop, for demos and soak tests |
+| Capture replay | `pcap:` packet source (§10.1): recorded or exchange-supplied captures through the full pipeline; replaying the same capture twice must give identical books |
+| CI | GitHub Actions (`.github/workflows/ci.yml`): build and all tests on JDK 21 for every push and pull request |
+
+### 10.1 Capture replay
+
+`PcapPacketSource` replays classic pcap (µs or ns, either byte order) and pcapng files; frames may be Ethernet with VLAN tags, Linux cooked v1/v2, raw IPv4 or BSD loopback. It extracts IPv4 UDP payloads in place, with no allocation. IP fragments and non-UDP traffic are skipped and counted.
+
+- **One reader per file per channel.** All lines of a channel that name the same file share one `PcapReplay`. A line may deliver only the packet that is next in the file, so the arbitrator sees A, B and snapshot packets interleaved exactly as captured. Independent per-line readers would let line A run arbitrarily far ahead of B and the snapshot feed, which never happens live.
+- **Inactive lines discard.** Packets for a snapshot line the decoder does not currently want are dropped, as a socket that has left the multicast group would drop them.
+- **Pacing.** `speed=1` replays at captured timing, `speed=N` N times faster and `speed=max` as fast as the lines are polled. Receive timestamps come from the handler clock, not the capture, so gap timeouts and line timeouts behave as they do live. At `speed=max` a gap the capture would have filled within the timeout is still filled, because packets keep their order; a gap that a slow B line filled late in real time may instead be filled immediately.
+- **Single thread.** A replay is polled by the thread that owns its channel; polling from a second thread throws.
+
+This is the basis for certification testing: replay CME's and Euronext's certification captures and compare the books and events against the expected output.
 
 ---
 
@@ -465,5 +478,6 @@ Implementation surfaced three issues that neither review round caught:
 | I-1 | A one-packet snapshot loop resends sequence 1 every cycle. The arbitrator saw a repeat, not a restart, so later loops were dropped as duplicates (found by `CmePipelineTest`) | `LineArbitrator.Config.loopingFeed`: on snapshot and definition feeds, a repeated sequence also starts a new loop |
 | I-2 | On macOS, `SystemEpochNanoClock` has only microsecond resolution, so latency histograms were quantized to 1 µs | `mdp.clock`: `system` (default on Linux, comparable across processes) or `offset` (ns resolution everywhere, calibrated per process; default elsewhere) |
 | I-3 | OTel runtime-telemetry 2.27 pulls incubator API 1.61, which is incompatible with SDK 1.68 | Pin matched releases: SDK 1.67.0 with instrumentation 2.33.1-alpha |
+| I-4 | Replaying a capture with an independent reader per line would let A, B and snapshot drift apart in time, producing arbitration and recovery behavior that never happens live | One `PcapReplay` per file per channel delivers packets in global capture order (§10.1) |
 
 Measured results are in the README's *Latency profile*. In short: the code-path median is 125–250 ns, the UDP kernel receive is about 8 µs, the hot threads allocate zero bytes, and a single channel sustains 3.36M packets/s. Tail latency on the development Mac is dominated by OS scheduling; §8 OS tuning on Linux is still to be measured.

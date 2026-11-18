@@ -1,5 +1,7 @@
 # MDP: Low-Latency Market Data Feed Handler
 
+[![CI](https://github.com/junhuabrave/mdp/actions/workflows/ci.yml/badge.svg)](https://github.com/junhuabrave/mdp/actions/workflows/ci.yml)
+
 Java 21 feed handler for SBE exchange market data: **CME MDP 3.0** and **Euronext Optiq MDG**. It is built on **Aeron**, **SBE** and **Agrona**, with OpenTelemetry → Prometheus → Grafana observability.
 
 - **Zero allocation on the hot path**, measured with zero bytes over 4M packets (see [latency profile](#latency-profile)).
@@ -23,7 +25,7 @@ Architecture, the resilience model and the review log are in [DESIGN.md](DESIGN.
 | Module | Contents |
 |---|---|
 | `mdp-schema` | Normalized SBE schema (`BookUpdate`, `Trade`, `InstrumentStatus`, `InstrumentDefinition`, `FeedEvent`) |
-| `mdp-core` | Transports (UDP multicast/unicast, Aeron, in-memory), `LineArbitrator`, recovery helpers, sinks (ring buffer, Aeron, inline), `BookManager`, agents, metrics |
+| `mdp-core` | Transports (UDP multicast/unicast, Aeron, pcap/pcapng replay, in-memory), `LineArbitrator`, recovery helpers, sinks (ring buffer, Aeron, inline), `BookManager`, agents, metrics |
 | `mdp-cme` | CME MDP 3.0 schema subset, `CmeFeedDecoder` (RptSeq recovery), `CmePacketWriter` |
 | `mdp-euronext` | Optiq MDG schema subset, `OptiqFeedDecoder` (snapshot and buffered-replay recovery), `OptiqPacketWriter` |
 | `mdp-otel` | `OtelCountersExporter`: counters, gauges and latency percentiles over OTLP, plus JVM runtime metrics |
@@ -36,7 +38,7 @@ Architecture, the resilience model and the review log are in [DESIGN.md](DESIGN.
 Requires JDK 21.
 
 ```bash
-./gradlew build                      # SBE codegen, compile, 20 tests (incl. end-to-end UDP for all modes)
+./gradlew build                      # SBE codegen, compile, 30 tests (incl. end-to-end UDP and capture replay)
 ./gradlew :mdp-app:installDist       # launcher at mdp-app/build/install/mdp-app/bin/mdp-app
 ```
 
@@ -94,7 +96,25 @@ mdp-app/build/install/mdp-app/bin/mdp-app simulate config/simulator-cme.properti
 
 In split mode, the hot processes run no exporter at all. Their counters live in the media driver's shared memory, and the `observer` sidecar exports them, together with Aeron's own driver counters.
 
-### 4. Benchmark
+### 4. Replay a capture
+
+Any line URI can be a capture file instead of a socket: `pcap:<file>?dst=<group>:<port>&speed=1|N|max`. Lines of one channel that name the same file replay in captured order, so A/B arbitration and snapshot recovery behave as they did on the wire. Classic pcap and pcapng are both supported, with Ethernet (including VLAN tags), Linux cooked or raw IP framing.
+
+Record the simulator's feed (after loss injection) instead of sending it:
+
+```bash
+JAVA_OPTS="-Dsim.pcap.out=captures/cme-310.pcap -Dsim.pcap.only=true -Dsim.durationSeconds=30" mdp-app/build/install/mdp-app/bin/mdp-app simulate config/simulator-cme.properties
+```
+
+Then replay it, or a real capture with CME's group:port per line:
+
+```bash
+mdp-app/build/install/mdp-app/bin/mdp-app config/replay-cme.properties
+```
+
+When the file ends, the log prints a summary of packets delivered per line and packets skipped (unmatched, non-UDP, fragments, truncated). Use `speed=max` for fast regression runs. `DeploymentModesTest` replays a lossy capture twice and checks the books come out identical.
+
+### 5. Benchmark
 
 ```bash
 mdp-app/build/install/mdp-app/bin/mdp-app benchmark --rate 100000 --seconds 10 --warmup 5
@@ -139,7 +159,7 @@ How to read this:
 
 **Consumer logic.** Implement `BookListener` (books with stale state) or `MarketDataListener` (raw normalized flyweights).
 
-**Transport.** Implement `PacketSource`, for example for kernel bypass or PCAP replay.
+**Transport.** Implement `PacketSource`, for example for kernel bypass. `PcapPacketSource` is a compact example.
 
 ## Production notes
 

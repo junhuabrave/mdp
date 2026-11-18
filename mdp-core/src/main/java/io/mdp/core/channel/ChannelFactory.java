@@ -10,6 +10,7 @@ import io.mdp.core.config.MdpConfig;
 import io.mdp.core.transport.AeronPacketSource;
 import io.mdp.core.transport.PacketSource;
 import io.mdp.core.transport.UdpPacketSource;
+import io.mdp.core.transport.pcap.PcapReplays;
 import org.agrona.concurrent.EpochNanoClock;
 
 /**
@@ -17,6 +18,8 @@ import org.agrona.concurrent.EpochNanoClock;
  * <ul>
  *   <li>{@code udp://...} gives a {@link UdpPacketSource}</li>
  *   <li>{@code aeron:...} gives an {@link AeronPacketSource}; the stream id comes from {@code <key>.streamId}</li>
+ *   <li>{@code pcap:...} replays a capture file (see {@link PcapReplays}); pass the same {@link PcapReplays}
+ *       for all feeds of a channel so its lines replay in captured order</li>
  * </ul>
  */
 public final class ChannelFactory
@@ -31,6 +34,17 @@ public final class ChannelFactory
         final FeedType feed,
         final Aeron aeron,
         final EpochNanoClock clock)
+    {
+        return sources(config, channelId, feed, aeron, clock, new PcapReplays(clock));
+    }
+
+    public static PacketSource[] sources(
+        final MdpConfig config,
+        final int channelId,
+        final FeedType feed,
+        final Aeron aeron,
+        final EpochNanoClock clock,
+        final PcapReplays pcapReplays)
     {
         final List<String> lines = config.lines(channelId, feed);
         final PacketSource[] sources = new PacketSource[lines.size()];
@@ -54,6 +68,10 @@ public final class ChannelFactory
                     throw new IllegalArgumentException("missing streamId for " + uri);
                 }
                 sources[i] = new AeronPacketSource(line, aeron.addSubscription(uri, streamId));
+            }
+            else if (PcapReplays.isPcapUri(uri))
+            {
+                sources[i] = pcapReplays.source(line, feed.name().toLowerCase() + "." + line, uri);
             }
             else
             {

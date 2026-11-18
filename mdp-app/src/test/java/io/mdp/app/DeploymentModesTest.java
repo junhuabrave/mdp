@@ -2,7 +2,9 @@ package io.mdp.app;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import io.aeron.driver.MediaDriver;
 import io.aeron.driver.ThreadingMode;
@@ -32,9 +34,16 @@ class DeploymentModesTest
     {
         final AtomicInteger gaps = new AtomicInteger();
         final AtomicInteger channelRecoveries = new AtomicInteger();
+        final AtomicLong lastActivityNs = new AtomicLong(System.nanoTime());
+
+        public void onBookChanged(final PriceLevelBook book, final boolean endOfEvent, final long receiveTimeNs)
+        {
+            lastActivityNs.set(System.nanoTime());
+        }
 
         public void onFeedEvent(final FeedEventDecoder event)
         {
+            lastActivityNs.set(System.nanoTime());
             if (event.eventType() == FeedEventType.GAP_DETECTED)
             {
                 gaps.incrementAndGet();
@@ -142,6 +151,66 @@ class DeploymentModesTest
         }
         assertAllBooksLive(app.bookManager());
         assertTrue(events.channelRecoveries.get() >= 1);
+    }
+
+    @Test
+    void replaysRecordedCaptureDeterministically(@TempDir final Path tmp) throws Exception
+    {
+        final Path capture = tmp.resolve("cme-310.pcap");
+        runSimulator(simulator("cme-mdp3", 41300, 0.002)
+            .with("sim.pcap.out", capture.toString())
+            .with("sim.pcap.only", "true"));
+
+        final String base = "pcap:" + capture + "?speed=max&dst=127.0.0.1:";
+        final MdpConfig config = MdpConfig.of(
+            "mdp.mode", "all-in-one",
+            "mdp.protocol", "cme-mdp3",
+            "mdp.channels", "310",
+            "mdp.channel.310.incremental.A", base + 41300,
+            "mdp.channel.310.incremental.B", base + 41301,
+            "mdp.channel.310.snapshot.A", base + 41310,
+            "mdp.idle.receiver", "backoff",
+            "mdp.idle.consumer", "backoff");
+
+        final String[] finalBooks = new String[2];
+        for (int run = 0; run < 2; run++)
+        {
+            final EventCounter events = new EventCounter();
+            final FeedHandlerApp app = FeedHandlerApp.start(config, events);
+            try
+            {
+                awaitQuiet(events, 300, 20_000);
+            }
+            finally
+            {
+                app.close();
+            }
+            assertAllBooksLive(app.bookManager());
+            assertTrue(events.gaps.get() > 0, "loss on both lines is in the capture, so replay must see gaps");
+            assertTrue(events.channelRecoveries.get() >= 2, "startup recovery plus gap recoveries");
+            final StringBuilder books = new StringBuilder();
+            for (int i = 1; i <= INSTRUMENTS; i++)
+            {
+                books.append(app.bookManager().book(i)).append('\n');
+            }
+            finalBooks[run] = books.toString();
+        }
+        assertEquals(finalBooks[0], finalBooks[1], "replaying the same capture must give the same books");
+    }
+
+    private static void awaitQuiet(final EventCounter events, final long quietMillis, final long timeoutMillis)
+        throws InterruptedException
+    {
+        final long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        Thread.sleep(quietMillis);
+        while (System.nanoTime() - events.lastActivityNs.get() < TimeUnit.MILLISECONDS.toNanos(quietMillis))
+        {
+            if (System.nanoTime() > deadline)
+            {
+                throw new AssertionError("replay still producing events after " + timeoutMillis + " ms");
+            }
+            Thread.sleep(50);
+        }
     }
 
     @Test
