@@ -1,6 +1,6 @@
 # MDP — Low-Latency Market Data Feed Handler
 
-Status: **Draft v0.1** — design for review before implementation
+Status: **v0.2** — revised after two review rounds (see §13)
 Scope: Java feed handler for SBE-encoded exchange market data (CME MDP 3.0, Euronext Optiq MDG), built on Aeron, SBE and Agrona.
 
 ---
@@ -83,7 +83,8 @@ Design rules:
 - **Fixed length only** (no var-data). Every message has a known maximum size, so `tryClaim(length)` works before encoding.
 - **Prices are decimal mantissa + exponent.** CME PRICE9 gives exponent −9. Optiq exponent = −priceDecimals from standing data. No floating point.
 - **The SBE message header is included in every record.** Ring-buffer records and Aeron fragments are byte-identical, so a consumer can forward a record to Aeron without re-encoding.
-- **Two timestamps:** `exchangeTimeNs` (venue) and `receiveTimeNs` (local, from `OffsetEpochNanoClock`, taken once per packet).
+- **Two timestamps:** `exchangeTimeNs` (venue) and `receiveTimeNs` (local, taken once per packet). `receiveTimeNs` uses `SystemEpochNanoClock` (`clock_gettime(CLOCK_REALTIME)`, about 20–30 ns). Every process on a host reads the same kernel clock, so latency is comparable across processes in split mode. A per-process `OffsetEpochNanoClock` calibration could disagree by microseconds. *(Review R1-6)*
+- **Event boundaries:** one exchange "event" (for example a CME match, closed by `MatchEventIndicator.EndOfEvent`) can produce many normalized messages. The last one carries `LAST_IN_EVENT`. Consumers should act on a book only at event end, never on a half-applied match. *(Review R1-2)*
 
 ---
 
@@ -150,6 +151,8 @@ Inside a decoder, dispatch is a `switch` on templateId. Handlers can be swapped 
 | `CounterFactory` | Aeron CnC counters, local `CountersManager` | — |
 | `IdleStrategy` | busy-spin, yield, backoff, sleep (Agrona) | — |
 
+**Consumer fan-out:** every listener on a consumer agent runs on that one thread, so one slow listener delays all of them. Latency-critical listeners get their own consumer: in all-in-one mode, a dedicated ring buffer per consumer group (the handler writes to N rings, or one ring is copied to N); in split mode, a separate Aeron subscriber. *(Review R1-4)*
+
 ### 5.3 Sink claim/commit contract (zero copy)
 
 ```java
@@ -186,6 +189,8 @@ timer (gapTimeout, e.g. 200 µs–1 ms) expires, or reorder buffer is full:
   → declare gap [expected, lowestBuffered-1] → decoder.onPacketGap(); skip ahead; drain the buffer
 ```
 
+- **Late packets:** a packet below `expected` that arrives after the arbitrator already declared a gap and skipped ahead is dropped and counted as `late`, separately from duplicates. A high late count means `gapTimeout` is too tight. *(Review R2-4)*
+- **Oversize packets:** a packet larger than a reorder slot cannot be buffered. It is counted (`oversize`), and the arbitrator treats it as lost for this line, so the other line may still fill it. *(Review R2-3)*
 - **Reorder buffer:** a pre-allocated ring of slots (power of two, default 1024 × 1500 B, sized for jumbo frames if needed). Packets are copied in only when they arrive out of order. The in-order fast path never copies.
 - **Per-line health:** packets, wins, duplicates, the line's own gaps, and time since last packet. A line is `DOWN` after `lineTimeout` with no packets (heartbeats count) and emits `FeedEvent LINE_DOWN/LINE_UP`. One line down is a warning. Both lines down is critical.
 - **Sequence reset:** `seq == 1` after `lastDelivered > 1` (CME weekly reset, Optiq SOD) emits `SEQUENCE_RESET` and resyncs. Snapshot arbitrators accept resets because snapshot loops restart at 1.
@@ -208,12 +213,20 @@ timer (gapTimeout, e.g. 200 µs–1 ms) expires, or reorder buffer is full:
 - While any instrument is stale, `wantsSnapshot()` is true and the channel joins the snapshot loop.
 - `SnapshotFullRefresh52` for a stale instrument is applied only when `snapshot.RptSeq >= lastSeenRptSeq`. It then emits book-clear, the snapshot levels (flag `SNAPSHOT`) and `RECOVERY_COMPLETE`, and sets `expectedRptSeq = RptSeq + 1`. An older snapshot is skipped and the next loop is used. This keeps the order correct without buffering incrementals.
 - When no instruments are stale, the channel leaves the snapshot feed, saving CPU and NIC bandwidth.
+- **Activating snapshot sources** (`PacketSource.activate()/deactivate()`) *(Review R2-2)*. If the handler stopped polling a socket but stayed in the group, the kernel buffer would fill with old snapshot packets that get replayed on resume. So:
+  - The UDP source **leaves the multicast group** on deactivate and joins again on activate. IGMP join latency (milliseconds) is negligible next to the snapshot loop period.
+  - The UDP unicast source and the Aeron source **drain and discard** while inactive.
+  - The snapshot arbitrator resets on each activation.
 
 **Euronext Optiq — snapshot plus buffered replay**
 
 - On gap: every instrument goes stale and incremental packets are copied into a bounded `PacketReplayBuffer`.
 - Snapshot cycle: `StartOfSnapshot` → instrument messages (applied to a reset book, flag `SNAPSHOT`) → `EndOfSnapshot(lastPacketSeq = L)`.
 - On end: if the buffer holds `L+1` without a hole, replay the buffered packets with seq > L, go LIVE, and emit `RECOVERY_COMPLETE`. If the buffer overflowed past L+1, wait for the next cycle.
+
+**Instrument definitions:** CME publishes definitions on a separate looping instrument-definition feed. Euronext publishes them as `StandingData` on the snapshot channel. Each channel has an optional third feed type, `definition`, polled at startup and whenever definitions are missing. Books do not depend on definitions (prices are carried as mantissa/exponent), so a missing definition never blocks market data. *(Review R1-3)*
+
+**Implied books (CME):** implied entries (`MDEntryType` E/F) are normalized with `bookType=IMPLIED` and kept in a separate book. Merging outright and implied books is a consumer concern. *(Review R1-8)*
 
 `PacketReplayBuffer`, `InstrumentStateTable` (open-addressing long → state) and `RecoveryControl` live in `mdp-core` so new venues can reuse them.
 
@@ -226,13 +239,15 @@ Consumers never have to guess whether data is valid:
 
 ### 6.5 Back-pressure and overload
 
-- Ring buffer or Aeron publication full → policy `DROP_AND_MARK_STALE` (default: the hot path never blocks; count the drop, emit `BOOK_STALE` when space returns, trigger recovery) or `SPIN` (lossless, for recorders and back-tests).
+- Ring buffer or Aeron publication full → policy `DROP_AND_MARK_STALE` (default: the hot path never blocks) or `SPIN` (lossless, for recorders and back-tests). With `SPIN`, a stalled consumer backs up into the kernel socket buffer and then causes packet loss, so the risk moves rather than disappears.
+- How a drop is handled: the sink sets a `dropped` flag. After each packet, the channel handler checks the flag and calls `decoder.onSinkDrop()`. The decoder then treats the drop exactly like a packet gap (CME: channel stale → snapshot; Optiq: stale + buffering). `BOOK_STALE` is emitted with `SPIN` semantics once space returns, because losing the stale notice itself would break the downstream contract. *(Review R1-5)*
 - Socket: `SO_RCVBUF` is configurable (default 16 MB). The kernel drop counter (`/proc/net/snmp` `RcvbufErrors` on Linux) is exported by the observer.
 - Aeron: when the publication returns `BACK_PRESSURED` or `NOT_CONNECTED`, the result is counted per stream.
 
 ### 6.6 Process-level resilience
 
-- **Hot-hot handlers:** run two handler instances, on separate hosts or NICs, that publish the same normalized stream. Each normalized event carries `packetSeq`, so a downstream `NormalizedArbitrator` (the same algorithm as §6.1, keyed on `(channelId, packetSeq)`) can merge them. This removes the handler as a single point of failure without consensus overhead.
+- **Hot-hot handlers:** run two handler instances, on separate hosts or NICs, each publishing its own normalized stream. The consumer side uses **per-channel primary/backup failover**, not per-event merging. It follows the primary's stream for a channel and switches to the backup when the primary goes stale or silent for longer than `failoverTimeout` while the backup is live. After switching it rebuilds that channel's books from the backup (the backup re-sends a book image on request, or the consumer marks the channel stale until the next snapshot-flagged image).
+  *Why not merge per event, as v0.1 proposed:* one packet produces a variable number of normalized events, and snapshot-sourced events differ between instances (each recovers at a different point in the loop), so `(channelId, packetSeq)` is not a unique, comparable key. *(Review R1-1)*
 - **Recording/replay:** the `recorder` role uses **Aeron Archive** to record the normalized (and optionally raw) streams. It supports audit, post-trade replay and fast restart of consumers.
 - **Fast restart:** a restarted handler starts in `STALE` and recovers from the snapshot feed. No local state is needed.
 - **Process supervision** is the job of systemd or k8s. Liveness = duty-cycle heartbeat counter advancing. Readiness = all channels LIVE.
@@ -251,6 +266,9 @@ The same classes are wired differently by `mdp.mode`.
          Optional: Aeron publication of the normalized stream for other local processes (IPC)
 ```
 - Fewest hops. No Aeron is needed unless the stream is shared.
+- **Pipeline sub-modes** (`mdp.pipeline`), chosen per deployment *(Review R2-1)*:
+  - `ringbuffer` (default): the decoder and the consumer run on separate threads. Decoding never waits on a listener, at the cost of one cross-core hand-off (≈ 50–150 ns plus a cache-line transfer).
+  - `inline`: `DirectDispatchSink` encodes into a reusable scratch buffer and calls the consumer handler on the receiver thread right away. This is the lowest latency, but a slow listener delays socket reads, so use it only with trivially fast listeners.
 - Threads: 1 receiver (all channels, or one per channel group), 1 consumer, 1 metrics. Pin hot threads to isolated cores with `taskset`/`isolcpus`, outside the JVM.
 
 ### 7.2 Split components (flexibility and fan-out)
@@ -390,10 +408,50 @@ Logs: lifecycle and errors only, from non-hot threads (`System.Logger`). Hot-pat
 | 6 | Launcher modes, simulator, docker-compose stack, Grafana dashboards, alerts | Demo: simulator with 1% loss on A → no channel gaps; loss on A and B → gap → recovery shown in Grafana |
 | 7 | Latency benchmark, allocation verification, README | Published latency numbers; zero hot-path allocation |
 
-## 12. Open questions
+## 12. Expected latency budget (in-process, tuned Linux host, before measurement)
+
+| Stage | Estimate | Notes |
+|---|---|---|
+| NIC → kernel → `DatagramChannel.receive` | 2–8 µs | Kernel UDP stack plus syscall. This dominates. Kernel bypass (Onload/ef_vi) cuts it to ≈1 µs |
+| Arbitration (in order, no copy) | 10–30 ns | One sequence compare |
+| SBE decode + normalize + `tryClaim/commit` per message | 50–200 ns | Flyweights, no allocation |
+| Ring-buffer hand-off to consumer thread | 50–150 ns | Cross-core cache transfer; zero in `inline` mode |
+| Book update + listener dispatch | 20–80 ns | Fixed-depth arrays |
+| Aeron IPC hop (split mode, each hop) | 100–300 ns | Plus scheduling jitter if not busy-spinning |
+
+The code-path budget (receive returned → listener invoked) is **< 1 µs p50 and < 5 µs p99** on isolated cores. The benchmark measures this path separately from the kernel receive path. *(Review R2-5)*
+
+## 13. Review log
+
+**Round 1 (correctness and data contract)**
+
+| Id | Finding | Resolution |
+|---|---|---|
+| R1-1 | Hot-hot per-event merge keyed on `(channel, packetSeq)` is unsound: one packet makes a variable number of events, and snapshot events differ between instances | Replaced with per-channel primary/backup failover (§6.6) |
+| R1-2 | No event-boundary semantics, so consumers could act on half-applied matches | `LAST_IN_EVENT` flag from `MatchEventIndicator.EndOfEvent` (§3.2) |
+| R1-3 | Instrument definitions not covered (CME has a separate definition feed) | Optional `definition` feed type; books do not depend on definitions (§6.3) |
+| R1-4 | One consumer thread runs all listeners, so a slow listener delays all of them | Fan-out guidance: rings per consumer group, Aeron subscribers (§5.2) |
+| R1-5 | Sink drop → stale path was underspecified | `onSinkDrop` treated as a gap; stale notice published with spin semantics (§6.5) |
+| R1-6 | `OffsetEpochNanoClock` calibrations differ across processes, which skews split-mode latency | Use `SystemEpochNanoClock` (host-wide clock) (§3.2) |
+| R1-7 | MBO scope open | Interim: MBO passed through, BookManager is MBP (§12 Q4) |
+| R1-8 | CME implied prices not handled | Separate `IMPLIED` book type (§6.3) |
+
+**Round 2 (latency, implementability, edge behavior)**
+
+| Id | Finding | Resolution |
+|---|---|---|
+| R2-1 | All-in-one always pays a ring-buffer hop | `inline` pipeline sub-mode (§7.1) |
+| R2-2 | When a gated snapshot socket is not polled, the kernel queues old packets | `activate/deactivate`: leave/join the multicast group; drain for unicast and Aeron (§6.3) |
+| R2-3 | A packet larger than the reorder slot had no defined handling | Count `oversize` and treat as lost on that line (§6.1) |
+| R2-4 | Late arrivals after a declared gap were mixed into the duplicate count | Separate `late` counter as a `gapTimeout` tuning signal (§6.1) |
+| R2-5 | No latency budget to measure against | §12 budget; the benchmark measures the code path separately from kernel receive |
+| R2-6 | Euronext framing unverified, so a wrong length could misparse the rest of the packet | The decoder computes each message length from the schema (`blockLength` + group dimensions); an unknown template abandons the rest of the packet and counts `unknown` instead of guessing |
+| R2-7 | Timers using `System.nanoTime()` on every check add cost | One cached nano clock read per duty cycle, shared by every channel in the agent |
+
+## 14. Open questions
 
 1. Which CME channels and Euronext segments come first? This sizes the instrument tables and reorder buffers.
 2. Is the official CME `templates_FixBinary.xml` and Optiq schema version pinned, or should the build fetch the latest?
 3. Is there PTP time sync on the target hosts? Wire-latency metrics depend on it.
-4. Is MBO (CME MBOFD, Optiq order updates) in scope for the consumer `BookManager` in v1, or are MBO events only passed through?
+4. Is MBO (CME MBOFD, Optiq order updates) in scope for the consumer `BookManager` in v1, or are MBO events only passed through? **Interim decision: v1 normalizes MBO events and passes them through. `BookManager` builds MBP books only, and an MBO book is an extension listener.**
 5. Is the metrics backend Prometheus/Grafana self-hosted, or Grafana Cloud/Mimir? It only changes the collector exporter config.
