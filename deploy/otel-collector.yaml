@@ -1,0 +1,31 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+
+exporters:
+  # Scraped by Prometheus. To push instead (Mimir, Grafana Cloud, Thanos), swap this for
+  # prometheusremotewrite; no change is needed in the feed handler.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true   # service.name / service.instance.id become labels
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]

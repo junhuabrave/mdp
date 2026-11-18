@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: mdp
+    folder: Market Data
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

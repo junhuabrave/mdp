@@ -1,0 +1,1163 @@
+{
+ "uid": "mdp-feed",
+ "title": "MDP Feed Handler",
+ "tags": [
+  "market-data",
+  "aeron",
+  "sbe"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "5s",
+ "time": {
+  "from": "now-15m",
+  "to": "now"
+ },
+ "templating": {
+  "list": [
+   {
+    "name": "channel",
+    "type": "query",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "prometheus"
+    },
+    "query": "label_values(mdp_line_packets_total, channel)",
+    "includeAll": true,
+    "multi": true,
+    "current": {
+     "text": "All",
+     "value": "$__all"
+    },
+    "allValue": ".*",
+    "refresh": 2
+   }
+  ]
+ },
+ "panels": [
+  {
+   "type": "row",
+   "title": "Feed health",
+   "id": 1,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 0
+   },
+   "panels": []
+  },
+  {
+   "type": "stat",
+   "title": "Lines up",
+   "description": "",
+   "id": 2,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 6,
+    "w": 8,
+    "x": 0,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": {
+         "text": "DOWN",
+         "color": "red"
+        },
+        "1": {
+         "text": "UP",
+         "color": "green"
+        }
+       }
+      }
+     ],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "colorMode": "background",
+    "graphMode": "none",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "mdp_line_up{channel=~\"$channel\",feed=\"incremental\"}",
+     "legendFormat": "ch {{channel}} line {{line}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "stat",
+   "title": "Channel state",
+   "description": "",
+   "id": 3,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 6,
+    "w": 8,
+    "x": 8,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": {
+         "text": "LIVE",
+         "color": "green"
+        },
+        "1": {
+         "text": "RECOVERING",
+         "color": "orange"
+        }
+       }
+      }
+     ],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "colorMode": "background",
+    "graphMode": "none",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "mdp_channel_state{channel=~\"$channel\"}",
+     "legendFormat": "ch {{channel}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "stat",
+   "title": "Stale instruments",
+   "description": "",
+   "id": 4,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 6,
+    "w": 8,
+    "x": 16,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "colorMode": "background",
+    "graphMode": "none",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "mdp_instruments_stale{channel=~\"$channel\"}",
+     "legendFormat": "ch {{channel}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Packets/s per line",
+   "description": "",
+   "id": 5,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 7
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "pps",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (channel,feed,line) (rate(mdp_line_packets_total{channel=~\"$channel\"}[1m]))",
+     "legendFormat": "ch {{channel}} {{feed}} {{line}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "A/B arbitration: wins vs duplicates",
+   "description": "Wins = first arrival used. A line that keeps losing the race points to a slower path.",
+   "id": 6,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 7
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "pps",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (channel,line) (rate(mdp_line_wins_total{channel=~\"$channel\",feed=\"incremental\"}[1m]))",
+     "legendFormat": "wins {{line}}",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (channel,line) (rate(mdp_line_duplicates_total{channel=~\"$channel\",feed=\"incremental\"}[1m]))",
+     "legendFormat": "dups {{line}}",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (channel,line) (rate(mdp_line_late_total{channel=~\"$channel\",feed=\"incremental\"}[1m]))",
+     "legendFormat": "late {{line}}",
+     "refId": "C"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Loss per line vs after arbitration",
+   "description": "Per-line gaps are absorbed by the other line; channel gaps trigger snapshot recovery.",
+   "id": 7,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 7
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (channel,line) (increase(mdp_line_gaps_total{channel=~\"$channel\",feed=\"incremental\"}[1m]))",
+     "legendFormat": "line {{line}} gaps",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (channel) (increase(mdp_channel_gaps_total{channel=~\"$channel\",feed=\"incremental\"}[1m]))",
+     "legendFormat": "CHANNEL gaps (both lines)",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (channel) (increase(mdp_channel_gap_packets_total{channel=~\"$channel\",feed=\"incremental\"}[1m]))",
+     "legendFormat": "CHANNEL lost packets",
+     "refId": "C"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Recoveries",
+   "description": "",
+   "id": 8,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 15
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (channel) (increase(mdp_recovery_count_total{channel=~\"$channel\"}[5m]))",
+     "legendFormat": "recoveries {{channel}}",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (channel) (increase(mdp_recovery_rejected_cycles_total{channel=~\"$channel\"}[5m]))",
+     "legendFormat": "rejected snapshot cycles {{channel}}",
+     "refId": "B"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Recovery duration (last)",
+   "description": "",
+   "id": 9,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 15
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ms",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "mdp_recovery_last_duration_ms{channel=~\"$channel\"}",
+     "legendFormat": "ch {{channel}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Reorder / replay buffering",
+   "description": "",
+   "id": 10,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 15
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "mdp_reorder_buffered{channel=~\"$channel\"}",
+     "legendFormat": "reorder {{channel}} {{feed}}",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "mdp_recovery_replay_buffered{channel=~\"$channel\"}",
+     "legendFormat": "replay {{channel}}",
+     "refId": "B"
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "Latency",
+   "id": 11,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 23
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "Decode: receive -> normalized commit",
+   "description": "",
+   "id": 12,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 24
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ns",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_decode_p50)",
+     "legendFormat": "p50",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_decode_p90)",
+     "legendFormat": "p90",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_decode_p99)",
+     "legendFormat": "p99",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_decode_p999)",
+     "legendFormat": "p999",
+     "refId": "D"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_decode_max)",
+     "legendFormat": "max",
+     "refId": "E"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "End to end: receive -> listener",
+   "description": "",
+   "id": 13,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 24
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ns",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_e2e_p50)",
+     "legendFormat": "p50",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_e2e_p90)",
+     "legendFormat": "p90",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_e2e_p99)",
+     "legendFormat": "p99",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_e2e_p999)",
+     "legendFormat": "p999",
+     "refId": "D"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_e2e_max)",
+     "legendFormat": "max",
+     "refId": "E"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Wire: exchange send -> receive (needs PTP)",
+   "description": "",
+   "id": 14,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 24
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ns",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_wire_p50)",
+     "legendFormat": "p50",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_wire_p90)",
+     "legendFormat": "p90",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_wire_p99)",
+     "legendFormat": "p99",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_wire_p999)",
+     "legendFormat": "p999",
+     "refId": "D"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (channel,role) (mdp_latency_wire_max)",
+     "legendFormat": "max",
+     "refId": "E"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Agent max duty cycle",
+   "description": "Longest busy duty cycle in the last 65k cycles: GC pauses, preemption, slow listeners.",
+   "id": 15,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 32
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ns",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "mdp_agent_maxcycle_ns",
+     "legendFormat": "{{agent}} {{service_instance_id}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Messages decoded / unknown / stale-dropped",
+   "description": "",
+   "id": 16,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 32
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ops",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (channel) (rate(mdp_messages_decoded_total{channel=~\"$channel\"}[1m]))",
+     "legendFormat": "decoded {{channel}}",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (channel) (rate(mdp_messages_unknown_total{channel=~\"$channel\"}[1m]))",
+     "legendFormat": "unknown {{channel}}",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (channel) (rate(mdp_messages_stale_dropped_total{channel=~\"$channel\"}[1m]))",
+     "legendFormat": "stale-dropped {{channel}}",
+     "refId": "C"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "JVM GC time",
+   "description": "",
+   "id": 17,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 32
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (service_name) (rate(jvm_gc_duration_seconds_sum[1m]))",
+     "legendFormat": "{{service_name}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "Capacity",
+   "id": 18,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 40
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "Ring buffer utilization",
+   "description": "",
+   "id": 19,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 41
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "mdp_ringbuffer_utilization_pct",
+     "legendFormat": "{{ring}} {{service_instance_id}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Sink drops / back-pressure",
+   "description": "",
+   "id": 20,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 41
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ops",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (sink) (rate(mdp_sink_dropped_total[1m]))",
+     "legendFormat": "dropped {{sink}}",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (sink) (rate(mdp_sink_backpressure_total[1m]))",
+     "legendFormat": "backpressure {{sink}}",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (sink) (rate(mdp_sink_published_total[1m]))",
+     "legendFormat": "published {{sink}}",
+     "refId": "C"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Aeron driver (observer)",
+   "description": "",
+   "id": 21,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 41
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "aeron_system{counter=~\"Errors.*|.*back-pressure.*|NAKs.*|Loss.*\"}",
+     "legendFormat": "{{counter}}",
+     "refId": "A"
+    }
+   ]
+  }
+ ]
+}

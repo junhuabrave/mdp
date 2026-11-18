@@ -1,0 +1,66 @@
+groups:
+  - name: mdp-feed-health
+    rules:
+      - alert: MdpChannelGap
+        expr: increase(mdp_channel_gaps_total{feed="incremental"}[1m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Channel {{ $labels.channel }}: packets lost on ALL lines (gap after arbitration)"
+          description: "Books on the channel went stale and recovered from the snapshot feed. Check both lines and kernel drops."
+
+      - alert: MdpLineDown
+        expr: mdp_line_up{feed="incremental"} == 0
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: "Channel {{ $labels.channel }} line {{ $labels.line }} silent; no redundancy left"
+
+      - alert: MdpBothLinesDown
+        expr: sum by (channel, service_instance_id) (mdp_line_up{feed="incremental"}) == 0
+        for: 10s
+        labels: { severity: critical }
+        annotations:
+          summary: "Channel {{ $labels.channel }}: every incremental line is down"
+
+      - alert: MdpStaleInstruments
+        expr: mdp_instruments_stale > 0
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: "Channel {{ $labels.channel }}: {{ $value }} instruments stale for 30s"
+
+      - alert: MdpRecoveryStuck
+        expr: mdp_channel_state == 1
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Channel {{ $labels.channel }} has been recovering for over 2 minutes"
+          description: "Snapshot feed down, or snapshots never cover the gap. Check mdp_recovery_rejected_cycles_total."
+
+      - alert: MdpSinkDrops
+        expr: increase(mdp_sink_dropped_total[1m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.sink }}: consumer too slow, events dropped (books marked stale)"
+
+      - alert: MdpLineLateArrivals
+        expr: increase(mdp_line_late_total[5m]) > 100
+        labels: { severity: info }
+        annotations:
+          summary: "Line {{ $labels.line }} often arrives after the gap timeout; consider raising mdp.arbitration.gapTimeoutMicros"
+
+  - name: mdp-latency
+    rules:
+      - alert: MdpEndToEndLatencyHigh
+        expr: mdp_latency_e2e_p99 > 50000
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "p99 receive-to-listener latency {{ $value }}ns over 50us"
+
+      - alert: MdpAgentStall
+        expr: mdp_agent_maxcycle_ns > 1000000
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.agent }} duty cycle over 1ms (GC, scheduling, or a slow listener)"

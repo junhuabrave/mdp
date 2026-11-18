@@ -47,6 +47,8 @@ public final class CmePacketWriter
     private final ChannelReset4Encoder channelReset = new ChannelReset4Encoder();
     private final MDInstrumentDefinitionFuture54Encoder definition = new MDInstrumentDefinitionFuture54Encoder();
     private int limit;
+    private int bookStart;
+    private MDIncrementalRefreshBook46Encoder.NoMDEntriesEncoder bookGroup;
 
     public CmePacketWriter(final int capacity)
     {
@@ -63,25 +65,51 @@ public final class CmePacketWriter
 
     public CmePacketWriter book(final long transactTime, final boolean endOfEvent, final BookEntry... entries)
     {
-        final int start = limit;
-        book.wrapAndApplyHeader(buffer, messageStart(), header)
-            .transactTime(transactTime);
-        book.matchEventIndicator().clear().endOfEvent(endOfEvent).lastQuoteMsg(endOfEvent);
-        final MDIncrementalRefreshBook46Encoder.NoMDEntriesEncoder group = book.noMDEntriesCount(entries.length);
+        beginBook(transactTime, endOfEvent, entries.length);
         for (final BookEntry e : entries)
         {
-            group.next()
-                .securityID(e.securityId())
-                .rptSeq(e.rptSeq())
-                .mDEntryType(MDEntryTypeBook.get((byte)e.entryType()))
-                .mDUpdateAction(e.action())
-                .mDPriceLevel((short)e.level())
-                .mDEntrySize(e.size())
-                .numberOfOrders(e.orders())
-                .mDEntryPx().mantissa(e.price());
+            addBookEntry(e.securityId(), e.rptSeq(), MDEntryTypeBook.get((byte)e.entryType()), e.action(), e.level(),
+                e.price(), e.size(), e.orders());
         }
+        return endBook();
+    }
+
+    /** Allocation-free form: {@code beginBook}, then {@code addBookEntry} {@code entryCount} times, then {@code endBook}. */
+    public CmePacketWriter beginBook(final long transactTime, final boolean endOfEvent, final int entryCount)
+    {
+        bookStart = limit;
+        book.wrapAndApplyHeader(buffer, messageStart(), header).transactTime(transactTime);
+        book.matchEventIndicator().clear().endOfEvent(endOfEvent).lastQuoteMsg(endOfEvent);
+        bookGroup = book.noMDEntriesCount(entryCount);
+        return this;
+    }
+
+    public CmePacketWriter addBookEntry(
+        final int securityId,
+        final long rptSeq,
+        final MDEntryTypeBook entryType,
+        final MDUpdateAction action,
+        final int level,
+        final long price,
+        final int size,
+        final int orders)
+    {
+        bookGroup.next()
+            .securityID(securityId)
+            .rptSeq(rptSeq)
+            .mDEntryType(entryType)
+            .mDUpdateAction(action)
+            .mDPriceLevel((short)level)
+            .mDEntrySize(size)
+            .numberOfOrders(orders)
+            .mDEntryPx().mantissa(price);
+        return this;
+    }
+
+    public CmePacketWriter endBook()
+    {
         book.noOrderIDEntriesCount(0);
-        return endMessage(start, book.encodedLength());
+        return endMessage(bookStart, book.encodedLength());
     }
 
     public CmePacketWriter trade(final long transactTime, final boolean endOfEvent, final TradeEntry... entries)
