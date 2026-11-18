@@ -1,4 +1,4 @@
-package io.mdp.core.consumer;
+package io.mdp.client.consumer;
 
 import io.mdp.sbe.BookUpdateDecoder;
 import io.mdp.sbe.FeedEventDecoder;

@@ -1,5 +1,6 @@
 package io.mdp.core.consumer;
 
+import io.mdp.client.consumer.NormalizedMessageHandler;
 import io.mdp.core.metrics.MetricsRegistry;
 import org.agrona.concurrent.Agent;
 import org.agrona.concurrent.MessageHandler;

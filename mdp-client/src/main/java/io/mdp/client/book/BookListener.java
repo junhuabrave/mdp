@@ -1,4 +1,4 @@
-package io.mdp.core.book;
+package io.mdp.client.book;
 
 import io.mdp.sbe.FeedEventDecoder;
 import io.mdp.sbe.TradeDecoder;

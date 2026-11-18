@@ -9,21 +9,23 @@ import io.aeron.Aeron;
 import io.aeron.ExclusivePublication;
 import io.aeron.driver.MediaDriver;
 import io.aeron.driver.ThreadingMode;
+import io.mdp.client.book.BookListener;
+import io.mdp.client.book.BookManager;
+import io.mdp.client.consumer.AeronConsumerAgent;
+import io.mdp.client.consumer.MarketDataListener;
+import io.mdp.client.consumer.NormalizedDispatcher;
+import io.mdp.client.consumer.NormalizedMessageHandler;
+import io.mdp.client.stream.MdpStreamClient;
+import io.mdp.client.stream.RecoveringBookStream;
 import io.mdp.core.api.DecoderContext;
 import io.mdp.core.api.FeedDecoder;
 import io.mdp.core.api.FeedProtocol;
 import io.mdp.core.api.FeedType;
-import io.mdp.core.book.BookListener;
-import io.mdp.core.book.BookManager;
 import io.mdp.core.channel.ChannelFactory;
 import io.mdp.core.channel.ChannelHandler;
 import io.mdp.core.channel.FeedHandlerAgent;
 import io.mdp.core.config.MdpConfig;
-import io.mdp.core.consumer.AeronConsumerAgent;
 import io.mdp.core.consumer.LatencyProbe;
-import io.mdp.core.consumer.MarketDataListener;
-import io.mdp.core.consumer.NormalizedDispatcher;
-import io.mdp.core.consumer.NormalizedMessageHandler;
 import io.mdp.core.consumer.RingBufferConsumerAgent;
 import io.mdp.core.metrics.AeronCounterFactory;
 import io.mdp.core.metrics.LocalCounterFactory;
@@ -33,6 +35,7 @@ import io.mdp.core.sink.BackPressurePolicy;
 import io.mdp.core.sink.DirectDispatchSink;
 import io.mdp.core.sink.NormalizedSink;
 import io.mdp.core.sink.RingBufferSink;
+import io.mdp.core.snapshot.SnapshotPublisherAgent;
 import io.mdp.core.transport.AeronPacketRelay;
 import io.mdp.core.transport.PacketSource;
 import io.mdp.core.transport.pcap.PcapReplays;
@@ -69,6 +72,7 @@ public final class FeedHandlerApp implements AutoCloseable
     private Aeron aeron;
     private MetricsRegistry metrics;
     private BookManager bookManager;
+    private RecoveringBookStream recoveringStream;
 
     private FeedHandlerApp(final MdpConfig config)
     {
@@ -107,6 +111,12 @@ public final class FeedHandlerApp implements AutoCloseable
     public BookManager bookManager()
     {
         return bookManager;
+    }
+
+    /** The recovering stream of a consumer with {@code mdp.input.snapshot.streamId} set, else null. */
+    public RecoveringBookStream recoveringStream()
+    {
+        return recoveringStream;
     }
 
     public MetricsRegistry metrics()
@@ -201,9 +211,14 @@ public final class FeedHandlerApp implements AutoCloseable
         connectAeron();
         initMetrics();
         final FeedProtocol protocol = FeedProtocol.load(config.protocol());
-        final ExclusivePublication output = aeron.addExclusivePublication(
-            config.get("mdp.output.aeron.channel", "aeron:ipc"), config.getInt("mdp.output.aeron.streamId", 1001));
+        final String outputChannel = config.get("mdp.output.aeron.channel", "aeron:ipc");
+        final int outputStreamId = config.getInt("mdp.output.aeron.streamId", 1001);
+        final ExclusivePublication output = aeron.addExclusivePublication(outputChannel, outputStreamId);
         closeables.add(output);
+        if (config.getBoolean("mdp.output.snapshot.enabled", true))
+        {
+            startSnapshotPublisher(protocol, outputChannel, outputStreamId);
+        }
         final NormalizedSink sink = new AeronSink(output,
             BackPressurePolicy.valueOf(config.get("mdp.backpressure", "DROP_AND_MARK_STALE")), metrics, "normalized");
         final List<ChannelHandler> channels = new ArrayList<>();
@@ -216,16 +231,63 @@ public final class FeedHandlerApp implements AutoCloseable
         startExporter();
     }
 
+    /**
+     * Normalized snapshot loop (design: docs/DESIGN-API-CRYPTO.md §3): rebuilds books from this
+     * normalizer's output on its own thread and publishes full images on a separate stream, so
+     * consumers can join late or recover without asking the feed.
+     */
+    private void startSnapshotPublisher(final FeedProtocol protocol, final String outputChannel, final int outputStreamId)
+    {
+        // Subscribe before the normalizer publishes anything, so the publisher sees the stream from the start.
+        final var input = aeron.addSubscription(outputChannel, outputStreamId);
+        closeables.add(input);
+        final ExclusivePublication snapshotOut = aeron.addExclusivePublication(
+            config.get("mdp.output.snapshot.channel", outputChannel),
+            config.getInt("mdp.output.snapshot.streamId", outputStreamId + 1));
+        closeables.add(snapshotOut);
+        final NormalizedSink snapshotSink = new AeronSink(snapshotOut, BackPressurePolicy.DROP_AND_MARK_STALE, metrics,
+            "snapshot");
+        startAgent(new SnapshotPublisherAgent(input, snapshotSink, protocol.venueId(),
+                config.getInt("mdp.book.depth", 10),
+                config.getLong("mdp.output.snapshot.intervalMillis", 1000),
+                config.getInt("mdp.output.snapshot.imagesPerWork", 8),
+                clock, metrics),
+            config.get("mdp.idle.snapshot", "backoff"));
+    }
+
     private void startConsumer(final BookListener listener)
     {
         connectAeron();
         initMetrics();
+        final int snapshotStreamId = config.getInt("mdp.input.snapshot.streamId", -1);
+        if (snapshotStreamId > 0)
+        {
+            startRecoveringConsumer(listener, snapshotStreamId);
+            return;
+        }
         final var subscription = aeron.addSubscription(
             config.get("mdp.input.aeron.channel", config.get("mdp.output.aeron.channel", "aeron:ipc")),
             config.getInt("mdp.input.aeron.streamId", config.getInt("mdp.output.aeron.streamId", 1001)));
         closeables.add(subscription);
         startAgent(new AeronConsumerAgent(subscription, consumerHandler(listener), 256),
             config.get("mdp.idle.consumer", "busy-spin"));
+        startExporter();
+    }
+
+    /** Consumer that can join late: books recover from the normalized snapshot loop. */
+    private void startRecoveringConsumer(final BookListener listener, final int snapshotStreamId)
+    {
+        final String channel = config.get("mdp.input.aeron.channel", config.get("mdp.output.aeron.channel", "aeron:ipc"));
+        final var incremental = aeron.addSubscription(channel,
+            config.getInt("mdp.input.aeron.streamId", config.getInt("mdp.output.aeron.streamId", 1001)));
+        final var snapshot = aeron.addSubscription(config.get("mdp.input.snapshot.channel", channel), snapshotStreamId);
+        closeables.add(incremental);
+        closeables.add(snapshot);
+        final RecoveringBookStream stream = new RecoveringBookStream(config.getInt("mdp.book.depth", 10), listener,
+            config.getInt("mdp.input.recoveryBufferBytes", 64 * 1024 * 1024));
+        bookManager = stream.books();
+        recoveringStream = stream;
+        startAgent(new MdpStreamClient(incremental, snapshot, stream, 256), config.get("mdp.idle.consumer", "busy-spin"));
         startExporter();
     }
 

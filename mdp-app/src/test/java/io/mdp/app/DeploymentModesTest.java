@@ -9,9 +9,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import io.aeron.driver.MediaDriver;
 import io.aeron.driver.ThreadingMode;
 import io.mdp.app.sim.FeedSimulator;
-import io.mdp.core.book.BookListener;
-import io.mdp.core.book.BookManager;
-import io.mdp.core.book.PriceLevelBook;
+import io.mdp.client.book.BookListener;
+import io.mdp.client.book.BookManager;
+import io.mdp.client.book.PriceLevelBook;
 import io.mdp.core.config.MdpConfig;
 import io.mdp.sbe.FeedEventDecoder;
 import io.mdp.sbe.FeedEventType;
@@ -210,6 +210,77 @@ class DeploymentModesTest
                 throw new AssertionError("replay still producing events after " + timeoutMillis + " ms");
             }
             Thread.sleep(50);
+        }
+    }
+
+    @Test
+    void lateConsumerRecoversFromNormalizedSnapshotLoop(@TempDir final Path tmp) throws Exception
+    {
+        final Path capture = tmp.resolve("cme-310.pcap");
+        runSimulator(simulator("cme-mdp3", 41400, 0.002)
+            .with("sim.pcap.out", capture.toString())
+            .with("sim.pcap.only", "true"));
+
+        final String aeronDir = Files.createDirectories(tmp.resolve("aeron")).toString();
+        final MediaDriver driver = MediaDriver.launch(new MediaDriver.Context()
+            .aeronDirectoryName(aeronDir)
+            .threadingMode(ThreadingMode.SHARED)
+            .dirDeleteOnStart(true)
+            .dirDeleteOnShutdown(true));
+
+        final String base = "pcap:" + capture + "?speed=1&dst=127.0.0.1:";
+        final MdpConfig normalizerConfig = MdpConfig.of(
+            "mdp.mode", "normalizer",
+            "mdp.protocol", "cme-mdp3",
+            "mdp.channels", "310",
+            "mdp.aeron.dir", aeronDir,
+            "mdp.channel.310.incremental.A", base + 41400,
+            "mdp.channel.310.incremental.B", base + 41401,
+            "mdp.channel.310.snapshot.A", base + 41410,
+            "mdp.output.aeron.streamId", "1001",
+            "mdp.output.snapshot.streamId", "1002",
+            "mdp.output.snapshot.intervalMillis", "100",
+            "mdp.idle.receiver", "backoff");
+        final MdpConfig consumerConfig = MdpConfig.of(
+            "mdp.mode", "consumer",
+            "mdp.aeron.dir", aeronDir,
+            "mdp.input.aeron.channel", "aeron:ipc?tether=false",
+            "mdp.input.aeron.streamId", "1001",
+            "mdp.input.snapshot.streamId", "1002",
+            "mdp.idle.consumer", "backoff");
+
+        final EventCounter earlyEvents = new EventCounter();
+        final EventCounter lateEvents = new EventCounter();
+        final FeedHandlerApp early = FeedHandlerApp.start(consumerConfig, earlyEvents);
+        final FeedHandlerApp normalizer = FeedHandlerApp.start(normalizerConfig, new BookListener() {});
+        FeedHandlerApp late = null;
+        try
+        {
+            Thread.sleep(1200); // the capture is ~3 s long at speed 1: join in the middle
+            late = FeedHandlerApp.start(consumerConfig, lateEvents);
+            awaitQuiet(lateEvents, 500, 20_000);
+        }
+        finally
+        {
+            normalizer.close();
+            early.close();
+            if (null != late)
+            {
+                late.close();
+            }
+            driver.close();
+        }
+
+        assertAllBooksLive(early.bookManager());
+        assertAllBooksLive(late.bookManager());
+        assertTrue(late.recoveringStream().firstStreamSeq() > 1000, "late consumer must join mid-stream, joined at " +
+            late.recoveringStream().firstStreamSeq());
+        assertTrue(late.recoveringStream().imagesApplied() >= INSTRUMENTS, "late consumer synced from images");
+        assertEquals(0, late.recoveringStream().gaps());
+        for (int i = 1; i <= INSTRUMENTS; i++)
+        {
+            assertEquals(early.bookManager().book(i).toString(), late.bookManager().book(i).toString(),
+                "instrument " + i);
         }
     }
 

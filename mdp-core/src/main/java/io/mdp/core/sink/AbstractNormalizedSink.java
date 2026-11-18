@@ -8,6 +8,8 @@ import io.mdp.sbe.FeedEventEncoder;
 import io.mdp.sbe.InstrumentDefinitionEncoder;
 import io.mdp.sbe.InstrumentStatusEncoder;
 import io.mdp.sbe.MessageHeaderEncoder;
+import io.mdp.sbe.SnapshotBeginEncoder;
+import io.mdp.sbe.SnapshotEndEncoder;
 import io.mdp.sbe.TradeEncoder;
 import org.agrona.BufferUtil;
 import org.agrona.MutableDirectBuffer;
@@ -27,6 +29,8 @@ public abstract class AbstractNormalizedSink implements NormalizedSink
     private final InstrumentStatusEncoder instrumentStatus = new InstrumentStatusEncoder();
     private final InstrumentDefinitionEncoder instrumentDefinition = new InstrumentDefinitionEncoder();
     private final FeedEventEncoder feedEvent = new FeedEventEncoder();
+    private final SnapshotBeginEncoder snapshotBegin = new SnapshotBeginEncoder();
+    private final SnapshotEndEncoder snapshotEnd = new SnapshotEndEncoder();
     private final UnsafeBuffer scratch = new UnsafeBuffer(BufferUtil.allocateDirectAligned(1024, 64));
 
     private final BackPressurePolicy policy;
@@ -34,6 +38,7 @@ public abstract class AbstractNormalizedSink implements NormalizedSink
     private final AtomicCounter published;
     private boolean usingScratch;
     private boolean droppedSinceLastPoll;
+    private long streamSeq;
 
     protected AbstractNormalizedSink(
         final BackPressurePolicy policy, final MetricsRegistry metrics, final String sinkName)
@@ -59,31 +64,53 @@ public abstract class AbstractNormalizedSink implements NormalizedSink
     public BookUpdateEncoder bookUpdate()
     {
         claim(BookUpdateEncoder.TEMPLATE_ID, BookUpdateEncoder.BLOCK_LENGTH, false);
-        return bookUpdate.wrapAndApplyHeader(buffer(), offset(), headerEncoder);
+        return bookUpdate.wrapAndApplyHeader(buffer(), offset(), headerEncoder).streamSeq(++streamSeq).sizeExponent((byte)0);
     }
 
     public TradeEncoder trade()
     {
         claim(TradeEncoder.TEMPLATE_ID, TradeEncoder.BLOCK_LENGTH, false);
-        return trade.wrapAndApplyHeader(buffer(), offset(), headerEncoder);
+        return trade.wrapAndApplyHeader(buffer(), offset(), headerEncoder).streamSeq(++streamSeq).sizeExponent((byte)0);
     }
 
     public InstrumentStatusEncoder instrumentStatus()
     {
         claim(InstrumentStatusEncoder.TEMPLATE_ID, InstrumentStatusEncoder.BLOCK_LENGTH, false);
-        return instrumentStatus.wrapAndApplyHeader(buffer(), offset(), headerEncoder);
+        return instrumentStatus.wrapAndApplyHeader(buffer(), offset(), headerEncoder).streamSeq(++streamSeq);
     }
 
     public InstrumentDefinitionEncoder instrumentDefinition()
     {
         claim(InstrumentDefinitionEncoder.TEMPLATE_ID, InstrumentDefinitionEncoder.BLOCK_LENGTH, false);
-        return instrumentDefinition.wrapAndApplyHeader(buffer(), offset(), headerEncoder);
+        return instrumentDefinition.wrapAndApplyHeader(buffer(), offset(), headerEncoder)
+            .streamSeq(++streamSeq).lotSize(0).sizeExponent((byte)0);
     }
 
     public FeedEventEncoder feedEvent()
     {
         claim(FeedEventEncoder.TEMPLATE_ID, FeedEventEncoder.BLOCK_LENGTH, true);
-        return feedEvent.wrapAndApplyHeader(buffer(), offset(), headerEncoder);
+        return feedEvent.wrapAndApplyHeader(buffer(), offset(), headerEncoder).streamSeq(++streamSeq);
+    }
+
+    public SnapshotBeginEncoder snapshotBegin()
+    {
+        claim(SnapshotBeginEncoder.TEMPLATE_ID, SnapshotBeginEncoder.BLOCK_LENGTH, false);
+        return snapshotBegin.wrapAndApplyHeader(buffer(), offset(), headerEncoder).streamSeq(++streamSeq);
+    }
+
+    public SnapshotEndEncoder snapshotEnd()
+    {
+        claim(SnapshotEndEncoder.TEMPLATE_ID, SnapshotEndEncoder.BLOCK_LENGTH, false);
+        return snapshotEnd.wrapAndApplyHeader(buffer(), offset(), headerEncoder).streamSeq(++streamSeq);
+    }
+
+    /**
+     * Sequence number of the last message claimed. Every claim takes the next number, including
+     * claims dropped under back-pressure, so a drop shows up downstream as a {@code streamSeq} gap.
+     */
+    public long streamSeq()
+    {
+        return streamSeq;
     }
 
     public void commit()

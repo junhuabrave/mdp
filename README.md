@@ -26,6 +26,7 @@ The serving layer (subscription API, entitlements, history) and crypto venues ar
 | Module | Contents |
 |---|---|
 | `mdp-schema` | Normalized SBE schema (`BookUpdate`, `Trade`, `InstrumentStatus`, `InstrumentDefinition`, `FeedEvent`) |
+| `mdp-client` | Consumer side, with no feed code: `BookManager`, `PriceLevelBook`, `RecoveringBookStream` (joins late, repairs gaps from the normalized snapshot loop), `MdpStreamClient` |
 | `mdp-core` | Transports (UDP multicast/unicast, Aeron, pcap/pcapng replay, in-memory), `LineArbitrator`, recovery helpers, sinks (ring buffer, Aeron, inline), `BookManager`, agents, metrics |
 | `mdp-cme` | CME MDP 3.0 schema subset, `CmeFeedDecoder` (RptSeq recovery), `CmePacketWriter` |
 | `mdp-euronext` | Optiq MDG schema subset, `OptiqFeedDecoder` (snapshot and buffered-replay recovery), `OptiqPacketWriter` |
@@ -39,7 +40,7 @@ The serving layer (subscription API, entitlements, history) and crypto venues ar
 Requires JDK 21.
 
 ```bash
-./gradlew build                      # SBE codegen, compile, 30 tests (incl. end-to-end UDP and capture replay)
+./gradlew build                      # SBE codegen, compile, 37 tests (incl. end-to-end UDP, capture replay, late-joining consumer)
 ./gradlew :mdp-app:installDist       # launcher at mdp-app/build/install/mdp-app/bin/mdp-app
 ```
 
@@ -94,6 +95,8 @@ mdp-app/build/install/mdp-app/bin/mdp-app config/observer.properties       # met
 ```bash
 mdp-app/build/install/mdp-app/bin/mdp-app simulate config/simulator-cme.properties
 ```
+
+The normalizer also publishes a **normalized snapshot loop** (stream 1002): full book images on a separate stream. Consumers configured with `mdp.input.snapshot.streamId` can start at any time and repair gaps without asking the feed, and they subscribe untethered so a slow consumer can never slow the normalizer.
 
 In split mode, the hot processes run no exporter at all. Their counters live in the media driver's shared memory, and the `observer` sidecar exports them, together with Aeron's own driver counters.
 

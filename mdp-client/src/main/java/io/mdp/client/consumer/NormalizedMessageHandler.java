@@ -1,4 +1,4 @@
-package io.mdp.core.consumer;
+package io.mdp.client.consumer;
 
 import org.agrona.DirectBuffer;
 

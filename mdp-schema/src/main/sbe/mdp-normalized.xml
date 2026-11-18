@@ -3,12 +3,18 @@
   MDP normalized market data schema.
   Venue adapters translate exchange messages into these fixed-length messages.
   Fixed length only (no var data) so every message has a known size for tryClaim().
+
+  Version 2 (additive): streamSeq on every message, contiguous per published stream, for gap
+  detection by consumers; sizeExponent (size = mantissa x 10^sizeExponent) for fractional crypto
+  quantities; lotSize on definitions; SnapshotBegin/SnapshotEnd delimiting one book image in the
+  normalized snapshot loop. A snapshot image is valid as of incrementalSeq, the streamSeq of the
+  last incremental message it reflects.
 -->
 <sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe"
                    package="io.mdp.sbe"
                    id="900"
-                   version="1"
-                   semanticVersion="1.0"
+                   version="2"
+                   semanticVersion="2.0"
                    description="MDP normalized market data"
                    byteOrder="littleEndian">
     <types>
@@ -98,6 +104,8 @@
         <field name="packetSeq" id="15" type="uint64"/>
         <field name="exchangeTimeNs" id="16" type="uint64"/>
         <field name="receiveTimeNs" id="17" type="uint64"/>
+        <field name="streamSeq" id="18" type="uint64" sinceVersion="2"/>
+        <field name="sizeExponent" id="19" type="int8" sinceVersion="2"/>
     </sbe:message>
 
     <sbe:message name="Trade" id="2" description="Trade summary">
@@ -115,6 +123,8 @@
         <field name="packetSeq" id="12" type="uint64"/>
         <field name="exchangeTimeNs" id="13" type="uint64"/>
         <field name="receiveTimeNs" id="14" type="uint64"/>
+        <field name="streamSeq" id="15" type="uint64" sinceVersion="2"/>
+        <field name="sizeExponent" id="16" type="int8" sinceVersion="2"/>
     </sbe:message>
 
     <sbe:message name="InstrumentStatus" id="3" description="Trading status change">
@@ -126,6 +136,7 @@
         <field name="packetSeq" id="6" type="uint64"/>
         <field name="exchangeTimeNs" id="7" type="uint64"/>
         <field name="receiveTimeNs" id="8" type="uint64"/>
+        <field name="streamSeq" id="9" type="uint64" sinceVersion="2"/>
     </sbe:message>
 
     <sbe:message name="InstrumentDefinition" id="4" description="Static instrument data">
@@ -140,6 +151,9 @@
         <field name="currency" id="9" type="Currency"/>
         <field name="exchangeTimeNs" id="10" type="uint64"/>
         <field name="receiveTimeNs" id="11" type="uint64"/>
+        <field name="streamSeq" id="12" type="uint64" sinceVersion="2"/>
+        <field name="lotSize" id="13" type="int64" sinceVersion="2" description="mantissa at sizeExponent; 0 = unknown"/>
+        <field name="sizeExponent" id="14" type="int8" sinceVersion="2"/>
     </sbe:message>
 
     <sbe:message name="FeedEvent" id="5" description="Feed state change: gaps, staleness, recovery, line health">
@@ -150,6 +164,34 @@
         <field name="instrumentId" id="5" type="int64" description="0 = whole channel"/>
         <field name="fromSeq" id="6" type="uint64"/>
         <field name="toSeq" id="7" type="uint64"/>
+        <field name="timeNs" id="8" type="uint64"/>
+        <field name="streamSeq" id="9" type="uint64" sinceVersion="2"/>
+    </sbe:message>
+
+    <sbe:message name="SnapshotBegin" id="6" sinceVersion="2"
+                 description="Start of one book image in the snapshot loop; BookUpdate entries flagged snapshot follow">
+        <field name="venueId" id="1" type="uint16"/>
+        <field name="bookType" id="2" type="BookType"/>
+        <field name="priceExponent" id="3" type="int8"/>
+        <field name="sizeExponent" id="4" type="int8"/>
+        <field name="bookStale" id="5" type="uint8" description="1 = book is stale at the feed"/>
+        <field name="channelStale" id="6" type="uint8" description="1 = whole channel is stale at the feed"/>
+        <field name="entryCount" id="7" type="uint16"/>
+        <field name="channelId" id="8" type="uint32"/>
+        <field name="instrumentId" id="9" type="int64"/>
+        <field name="incrementalSeq" id="10" type="uint64" description="streamSeq of the last incremental message reflected"/>
+        <field name="streamSeq" id="11" type="uint64"/>
+        <field name="timeNs" id="12" type="uint64"/>
+    </sbe:message>
+
+    <sbe:message name="SnapshotEnd" id="7" sinceVersion="2" description="End of one book image">
+        <field name="venueId" id="1" type="uint16"/>
+        <field name="bookType" id="2" type="BookType"/>
+        <field name="entryCount" id="3" type="uint16"/>
+        <field name="channelId" id="4" type="uint32"/>
+        <field name="instrumentId" id="5" type="int64"/>
+        <field name="incrementalSeq" id="6" type="uint64"/>
+        <field name="streamSeq" id="7" type="uint64"/>
         <field name="timeNs" id="8" type="uint64"/>
     </sbe:message>
 </sbe:messageSchema>

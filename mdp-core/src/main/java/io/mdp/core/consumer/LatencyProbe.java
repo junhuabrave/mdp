@@ -1,5 +1,6 @@
 package io.mdp.core.consumer;
 
+import io.mdp.client.consumer.MarketDataListener;
 import io.mdp.core.metrics.LatencyRecorder;
 import io.mdp.sbe.BookUpdateDecoder;
 import io.mdp.sbe.TradeDecoder;

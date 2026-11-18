@@ -1,6 +1,6 @@
 package io.mdp.core.sink;
 
-import io.mdp.core.consumer.NormalizedMessageHandler;
+import io.mdp.client.consumer.NormalizedMessageHandler;
 import io.mdp.core.metrics.MetricsRegistry;
 import org.agrona.BufferUtil;
 import org.agrona.MutableDirectBuffer;

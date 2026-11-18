@@ -1,4 +1,4 @@
-package io.mdp.core.book;
+package io.mdp.client.book;
 
 import io.mdp.sbe.Side;
 import io.mdp.sbe.UpdateAction;
@@ -17,6 +17,7 @@ public final class PriceLevelBook
     private final Ladder bids;
     private final Ladder asks;
     private int priceExponent;
+    private int sizeExponent;
     private boolean stale = true;
     private long lastUpdateNs;
 
@@ -86,6 +87,16 @@ public final class PriceLevelBook
     public void priceExponent(final int priceExponent)
     {
         this.priceExponent = priceExponent;
+    }
+
+    public int sizeExponent()
+    {
+        return sizeExponent;
+    }
+
+    public void sizeExponent(final int sizeExponent)
+    {
+        this.sizeExponent = sizeExponent;
     }
 
     public boolean isStale()

@@ -1,6 +1,6 @@
 # MDP Serving Layer and Crypto Feeds
 
-Status: **v1.0 design**, after three review rounds (§9). Not implemented yet.
+Status: **v1.1**, after three review rounds (§9). Step 1 of the delivery plan (§8) is implemented; findings from implementing it are in §11.
 Companion to [DESIGN.md](../DESIGN.md), which covers ingestion (CME MDP 3.0, Euronext Optiq).
 
 This document answers two questions:
@@ -68,8 +68,10 @@ Channels: `aeron:udp` multicast across hosts (production) or `aeron:ipc?tether=f
 
 Today `instrumentSeq` carries the **venue's** sequence (CME RptSeq, Optiq-specific). Downstream it can be non-contiguous and differs in meaning per venue, so a consumer cannot detect a gap with it. Schema v2 adds:
 
-- `streamSeq` (uint64): contiguous per stream, assigned by the normalizer at publication. Gap detection for the whole stream.
-- `bookSeq` (uint64): contiguous per `(venueId, instrumentId)`, incremented per book-changing event. Snapshot entries carry the `bookSeq` they represent. A consumer applies incrementals with `bookSeq > snapshot.bookSeq`, which is CME's RptSeq rule, already implemented in `InstrumentStateTable`.
+- `streamSeq` (uint64): contiguous per stream, assigned by the sink at claim time (dropped claims also take a number, so a drop under back-pressure is a visible gap). Gap detection for the whole stream.
+- Snapshot images carry `incrementalSeq`: the `streamSeq` of the last incremental message the image reflects. A consumer accepts an image for an unsynced book only if it has processed the stream up to that point and still holds every later message for the book, then replays those messages (§11, I-5).
+
+*Implemented differently from v1.0:* a per-book `bookSeq` was dropped in favour of the image's stream position (§11, I-5).
 
 `instrumentSeq` stays as the venue's own number, for audit and debugging.
 
@@ -337,7 +339,7 @@ Steps 1–3 are the demoable slice: **one codebase that ingests CME, Euronext an
 | R1-1 | An API inside the consumer process shares a JVM, a release cycle and a failure domain with the feed. A GC pause or a bug in client handling hits ingestion | API is a separate service; depends only on `mdp-schema` + `mdp-client`; enforced by a build rule (§3.5) |
 | R1-2 | Normalizer output is `aeron:ipc` and tethered by default. A slow API back-pressures the normalizer once a term-window behind | API subscribes untethered or over multicast; falling behind means loss plus self-recovery, never feed back-pressure (§3.4) |
 | R1-3 | A late-joining or restarted API has no way to rebuild state except asking the feed, which is coupling through request/response | The feed publishes a snapshot loop and refdata loop like an exchange; consumers reuse mdp's own recovery algorithm (§3.1) |
-| R1-4 | `instrumentSeq` is the venue's number and not contiguous in the normalized stream, so gaps are undetectable downstream | Add `streamSeq` (per stream) and `bookSeq` (per book) at publication (§3.2) |
+| R1-4 | `instrumentSeq` is the venue's number and not contiguous in the normalized stream, so gaps are undetectable downstream | Add `streamSeq` (per stream) at publication; per-book sequencing replaced in step 1 by the image's stream position (§3.2, §11 I-5) |
 | R1-5 | `instrumentId` is venue-local and collides across venues | Key is `(venueId, instrumentId)` everywhere; canonical symbols mapped in the API (§4.5) |
 | R1-6 | Independent release cycles need explicit schema compatibility | Add-only fields, skip unknown templates, consumers upgrade first, golden-capture contract tests in both CIs (§3.5) |
 
@@ -372,3 +374,26 @@ Steps 1–3 are the demoable slice: **one codebase that ingests CME, Euronext an
 - **Coinbase product:** Advanced Trade WebSocket or Exchange WebSocket (institutional, different auth and channels). Galaxy's flow likely points to Exchange or Prime: decide before step 5.
 - **Tick store:** ClickHouse (simple to operate, SQL) or kdb+ (industry standard for ticks, licensed) or Parquet on object storage (cheap, batch). This depends on the query latency needed for history.
 - **Snapshot loop source:** a book copy on a separate agent, or replay from Archive. The first is simpler; the second removes snapshot work from the normalizer host.
+
+---
+
+## 11. Implementation findings (step 1)
+
+Step 1 is implemented: schema v2, `streamSeq` stamping in every sink, `SnapshotPublisherAgent` (normalizer side), and the new `mdp-client` module (`RecoveringBookStream`, `MdpStreamClient`), with the book and consumer classes moved out of `mdp-core`. `DeploymentModesTest.lateConsumerRecoversFromNormalizedSnapshotLoop` checks the step's acceptance criterion: a normalizer replays a lossy CME capture, one consumer starts before it and one joins mid-stream (at streamSeq > 1000), and both end with identical, live books. Six unit tests in `RecoveringBookStreamTest` cover the edge cases.
+
+| Id | Finding | Resolution |
+|---|---|---|
+| I-5 | A per-book `bookSeq` needs a hash lookup per message on the normalizer's hot thread, and only duplicates what the stream position already says | Images carry `incrementalSeq` (stream position). Consumers buffer messages for unsynced books while recovering and replay those after the image. Per-instrument sequencing for API clients is assigned by the API (§4.2), which is where it is needed |
+| I-6 | A channel-level `RECOVERY_COMPLETE` would mark every book in the channel live, including books the consumer has not synced yet | `BookManager.LiveGate`: a recovering consumer allows only synced books to go live |
+| I-7 | A feed event processed while not buffering could be missed by an older image of a book the consumer has never seen | Unbuffered feed events move the coverage start forward, so only images taken after them are accepted |
+| I-8 | Agrona's `ExpandableRingBuffer` enforces its maximum only when it grows: with a 64 KB initial size, a smaller maximum was ignored (found by a unit test) | Initial size capped at the maximum |
+| I-9 | Where the snapshot loop gets its books from | A separate agent in the normalizer process subscribes to the normalizer's own output (tethered, in-process), so it never touches the normalizer thread. If it ever sees a gap it has no source of truth, so it stops publishing images and logs an error rather than serve wrong books |
+
+Not done in step 1, and still open:
+- The `refdata` loop stream (§3.1).
+- The Gradle rule that `mdp-api` must not depend on `mdp-core` waits for the `mdp-api` module. `mdp-client` already cannot see `mdp-core`, because the dependency only goes the other way.
+- Snapshot images cover books, not trading status: a late joiner learns an instrument's status from the next `InstrumentStatus`.
+- Recovering consumers do not run the e2e/wire `LatencyProbe` yet.
+- Books for instruments that never update after a consumer joins appear only once they update, because the snapshot stream is read only while recovering (R3-3).
+
+Benchmark after step 1 (same M2 laptop): p50 unchanged at 125 ns inline and 250 ns for the ring buffer and Aeron IPC. Over three runs, two showed a one-off allocation in a single scenario (176 and 1,544 bytes over about 500k packets) and the third showed none. That pattern points to warm-up effects, not a per-packet cost; it has not been investigated further.

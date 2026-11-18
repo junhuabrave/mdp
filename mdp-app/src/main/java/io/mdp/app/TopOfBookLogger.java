@@ -2,8 +2,8 @@ package io.mdp.app;
 
 import java.util.concurrent.TimeUnit;
 
-import io.mdp.core.book.BookListener;
-import io.mdp.core.book.PriceLevelBook;
+import io.mdp.client.book.BookListener;
+import io.mdp.client.book.PriceLevelBook;
 import io.mdp.sbe.FeedEventDecoder;
 import io.mdp.sbe.TradeDecoder;
 

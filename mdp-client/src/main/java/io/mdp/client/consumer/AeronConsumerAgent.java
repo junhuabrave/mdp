@@ -1,4 +1,4 @@
-package io.mdp.core.consumer;
+package io.mdp.client.consumer;
 
 import io.aeron.Subscription;
 import io.aeron.logbuffer.FragmentHandler;

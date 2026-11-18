@@ -4,13 +4,15 @@ import io.mdp.sbe.BookUpdateEncoder;
 import io.mdp.sbe.FeedEventEncoder;
 import io.mdp.sbe.InstrumentDefinitionEncoder;
 import io.mdp.sbe.InstrumentStatusEncoder;
+import io.mdp.sbe.SnapshotBeginEncoder;
+import io.mdp.sbe.SnapshotEndEncoder;
 import io.mdp.sbe.TradeEncoder;
 
 /**
  * Zero-copy output for normalized events.
  * <p>
  * Usage: call one claim method, fill in the returned encoder (already wrapped, with the SBE header
- * written), then call {@link #commit()}. Exactly one claim may be outstanding at a time.
+ * written, and {@code streamSeq} set), then call {@link #commit()}. Exactly one claim may be outstanding at a time.
  * <p>
  * If the claim fails because of back-pressure, the encoder is wrapped over a scratch buffer, so
  * the caller's code path is the same, {@link #commit()} does nothing, and the drop is reported
@@ -28,6 +30,11 @@ public interface NormalizedSink
     InstrumentDefinitionEncoder instrumentDefinition();
 
     FeedEventEncoder feedEvent();
+
+    /** Start of one book image in the normalized snapshot loop (snapshot publisher only). */
+    SnapshotBeginEncoder snapshotBegin();
+
+    SnapshotEndEncoder snapshotEnd();
 
     void commit();
 
