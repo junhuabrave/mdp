@@ -1,6 +1,6 @@
 # MDP — Low-Latency Market Data Feed Handler
 
-Status: **v0.2** — revised after two review rounds (see §13)
+Status: **v0.3**: implemented. Revised after two review rounds (§13) and implementation findings (§15)
 Scope: Java feed handler for SBE-encoded exchange market data (CME MDP 3.0, Euronext Optiq MDG), built on Aeron, SBE and Agrona.
 
 ---
@@ -455,3 +455,15 @@ The code-path budget (receive returned → listener invoked) is **< 1 µs p50 an
 3. Is there PTP time sync on the target hosts? Wire-latency metrics depend on it.
 4. Is MBO (CME MBOFD, Optiq order updates) in scope for the consumer `BookManager` in v1, or are MBO events only passed through? **Interim decision: v1 normalizes MBO events and passes them through. `BookManager` builds MBP books only, and an MBO book is an extension listener.**
 5. Is the metrics backend Prometheus/Grafana self-hosted, or Grafana Cloud/Mimir? It only changes the collector exporter config.
+
+## 15. Implementation findings (v0.3)
+
+Implementation surfaced three issues that neither review round caught:
+
+| Id | Finding | Resolution |
+|---|---|---|
+| I-1 | A one-packet snapshot loop resends sequence 1 every cycle. The arbitrator saw a repeat, not a restart, so later loops were dropped as duplicates (found by `CmePipelineTest`) | `LineArbitrator.Config.loopingFeed`: on snapshot and definition feeds, a repeated sequence also starts a new loop |
+| I-2 | On macOS, `SystemEpochNanoClock` has only microsecond resolution, so latency histograms were quantized to 1 µs | `mdp.clock`: `system` (default on Linux, comparable across processes) or `offset` (ns resolution everywhere, calibrated per process; default elsewhere) |
+| I-3 | OTel runtime-telemetry 2.27 pulls incubator API 1.61, which is incompatible with SDK 1.68 | Pin matched releases: SDK 1.67.0 with instrumentation 2.33.1-alpha |
+
+Measured results are in the README's *Latency profile*. In short: the code-path median is 125–250 ns, the UDP kernel receive is about 8 µs, the hot threads allocate zero bytes, and a single channel sustains 3.36M packets/s. Tail latency on the development Mac is dominated by OS scheduling; §8 OS tuning on Linux is still to be measured.
